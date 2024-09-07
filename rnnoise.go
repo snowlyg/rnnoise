@@ -7,26 +7,29 @@ import (
 	"unsafe"
 )
 
-func ProcessAudio(inputSamples, outputSamples []byte) {
+const MAX_FRAME_SIZE = 16384
+const FrameSize = 480
+
+func ProcessAudio(inputSamples []byte) {
 	// Create a new RNNoise state
 	st := C.rnnoise_create(nil)
 	// Destroy the RNNoise state
 	defer C.rnnoise_destroy(st)
 
-	// Apply RNNoise noise reduction to each frame
-	numFrames := len(inputSamples) / 4 // Assuming 16-bit PCM format (2 bytes per channel)
-	for i := 0; i < numFrames; i++ {
-		frameStart := i * 4
-		// frameEnd := frameStart + 4
+	// inBuf := make([]byte, FrameSize)
+	outBuf := make([]float32, FrameSize)
+	for {
+		if len(inputSamples) < FrameSize {
+			break
+		}
 
-		// Convert bytes to int16 for RNNoise
-		samples := *(*[2]int16)(unsafe.Pointer(&inputSamples[frameStart]))
-
-		// Apply RNNoise
-
-		C.rnnoise_process_frame(st, (*C.float)(unsafe.Pointer(&samples[0])), (*C.float)(unsafe.Pointer(&samples[0])))
-		// Convert int16 back to bytes for output
-		// copy(outputSamples[frameStart:frameEnd], *(*[4]byte)(unsafe.Pointer(&samples)))
+		// Convert int16 to float32
+		for i := range inputSamples {
+			outBuf[i] = float32(inputSamples[i])
+		}
+		C.rnnoise_process_frame(st, (*C.float)(unsafe.Pointer(&outBuf[0])), (*C.float)(unsafe.Pointer(&outBuf[0])))
+		for i := range outBuf {
+			inputSamples[i] = byte(outBuf[i])
+		}
 	}
-
 }

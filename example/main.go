@@ -1,11 +1,15 @@
 package main
 
+// #include <stdlib.h>
+// #include "rnnoise.h"
+import "C"
 import (
 	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"unsafe"
 )
 
 const FrameSize = 480
@@ -32,9 +36,9 @@ func Run() {
 	}
 	defer fout.Close()
 
-	// // Initialize RNNoise
-	// st := C.rnnoise_create(nil)
-	// defer C.rnnoise_destroy(st)
+	// Initialize RNNoise
+	st := C.rnnoise_create(nil)
+	defer C.rnnoise_destroy(st)
 
 	buf := make([]int16, FrameSize)
 	outBuf := make([]float32, FrameSize)
@@ -57,7 +61,7 @@ func Run() {
 		}
 
 		// Denoise the frame
-		// C.rnnoise_process_frame(st, (*C.float)(unsafe.Pointer(&outBuf[0])), (*C.float)(unsafe.Pointer(&outBuf[0])))
+		C.rnnoise_process_frame(st, (*C.float)(unsafe.Pointer(&outBuf[0])), (*C.float)(unsafe.Pointer(&outBuf[0])))
 		// Convert float32 back to int16
 		for i := range outBuf {
 			buf[i] = int16(outBuf[i])
