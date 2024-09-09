@@ -8,20 +8,34 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
 	"unsafe"
+
+	"github.com/gen2brain/malgo"
 )
 
 const FrameSize = 480
 
-func Run() {
-	if len(os.Args) != 3 {
+func b2f32(bytes []byte) float32 {
+	bits := binary.LittleEndian.Uint32(bytes)
+	return math.Float32frombits(bits)
+}
+
+func f322b(f float32) []byte {
+	bits := math.Float32bits(f)
+	bytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(bytes, bits)
+	return bytes
+}
+
+func main() {
+	if len(os.Args) != 2 {
 		fmt.Fprintf(os.Stderr, "Usage: %s <input noisy file> <output denoised file>\n", os.Args[0])
 		os.Exit(1)
 	}
 
 	inputFile := os.Args[1]
-	outputFile := os.Args[2]
 
 	// Open input and output files
 	f1, err := os.Open(inputFile)
@@ -30,55 +44,89 @@ func Run() {
 	}
 	defer f1.Close()
 
-	fout, err := os.Create(outputFile)
+	ctx, err := malgo.InitContext(nil, malgo.ContextConfig{}, nil)
 	if err != nil {
-		log.Fatalf("Failed to create output file: %v", err)
+		fmt.Println(err)
+		os.Exit(1)
 	}
-	defer fout.Close()
+	defer func() {
+		_ = ctx.Uninit()
+		ctx.Free()
+	}()
 
-	// Initialize RNNoise
+	sampleCount := make([]byte, FrameSize*4)
+
+	r, w := io.Pipe()
+	defer r.Close()
+	defer w.Close()
+	// Create a new RNNoise state
 	st := C.rnnoise_create(nil)
+	// Destroy the RNNoise state
 	defer C.rnnoise_destroy(st)
-
-	buf := make([]int16, FrameSize)
-	outBuf := make([]float32, FrameSize)
-
-	first := true
-
-	for {
-		// Read a frame of audio samples
-		err := binaryRead(f1, buf)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			log.Fatalf("Failed to read input file: %v", err)
-		}
-
-		// Convert int16 to float32
-		for i := range buf {
-			outBuf[i] = float32(buf[i])
-		}
-
-		// Denoise the frame
-		C.rnnoise_process_frame(st, (*C.float)(unsafe.Pointer(&outBuf[0])), (*C.float)(unsafe.Pointer(&outBuf[0])))
-		// Convert float32 back to int16
-		for i := range outBuf {
-			buf[i] = int16(outBuf[i])
-		}
-
-		// Write the denoised frame to the output file, skip the first frame
-		if !first {
-			err = binaryWrite(fout, buf)
-			if err != nil {
-				log.Fatalf("Failed to write output file: %v", err)
+	go func() {
+		for {
+			x, err := f1.Read(sampleCount)
+			if err == io.EOF {
+				println("EOF:", err.Error())
+				break
 			}
-		}
 
-		first = false
+			inputTmp := make([]float32, FrameSize)
+
+			inputIndex := 0
+			for i := 0; i < FrameSize; i++ {
+				inputTmp[i] = b2f32(sampleCount[inputIndex : inputIndex+4])
+				inputIndex += 4
+			}
+
+			out := make([]byte, 0)
+			if len(inputTmp) < FrameSize {
+				println("input < 480")
+				return
+			}
+
+			// Convert int16 to float32
+			C.rnnoise_process_frame(st, (*C.float)(unsafe.Pointer(&inputTmp[0])), (*C.float)(unsafe.Pointer(&inputTmp[0])))
+
+			outputIndex := 0
+			for i := 0; i < FrameSize; i++ {
+				out = append(out, f322b(inputTmp[i])...)
+				outputIndex += 4
+			}
+			println("out", len(out))
+			w.Write(out[:x])
+		}
+	}()
+
+	deviceConfig := malgo.DefaultDeviceConfig(malgo.Playback)
+	deviceConfig.Playback.Format = malgo.FormatS16
+	deviceConfig.Playback.Channels = 2
+	deviceConfig.SampleRate = 48000
+	deviceConfig.Alsa.NoMMap = 1
+
+	// This is the function that's used for sending more data to the device for playback.
+	onSamples := func(pOutputSample, pInputSamples []byte, framecount uint32) {
+		io.ReadFull(r, pOutputSample)
 	}
 
-	fmt.Println("Denoising completed successfully.")
+	deviceCallbacks := malgo.DeviceCallbacks{
+		Data: onSamples,
+	}
+	device, err := malgo.InitDevice(ctx.Context, deviceConfig, deviceCallbacks)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	defer device.Uninit()
+
+	err = device.Start()
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Press Enter to quit...")
+	fmt.Scanln()
 }
 
 // binaryRead reads a frame of int16 samples from the file.
