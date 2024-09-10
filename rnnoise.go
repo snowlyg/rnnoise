@@ -30,8 +30,52 @@ func f322b(f float32) []byte {
 	return bytes
 }
 
-func Run(inputFile string) {
+// Process
+func Process(sampleCount []byte) []byte {
 
+	if len(sampleCount) < FrameSize {
+		println("input < 480")
+		return sampleCount
+	}
+
+	// Create a new RNNoise state
+	st := C.rnnoise_create(nil)
+	// Destroy the RNNoise state
+	defer C.rnnoise_destroy(st)
+
+	piBuffer := bytes.NewReader(sampleCount)
+
+	inputTmp := make([]int16, FrameSize)
+	outTmp := make([]float32, FrameSize)
+
+	binaryRead(piBuffer, inputTmp)
+
+	for i := 0; i < FrameSize; i++ {
+		outTmp[i] = float32(inputTmp[i])
+	}
+
+	C.rnnoise_process_frame(st, (*C.float)(unsafe.Pointer(&outTmp[0])), (*C.float)(unsafe.Pointer(&outTmp[0])))
+
+	for i := 0; i < FrameSize; i++ {
+		inputTmp[i] = int16(outTmp[i])
+	}
+
+	buf := new(bytes.Buffer)
+	binaryWrite(buf, inputTmp)
+
+	out := make([]byte, len(sampleCount))
+	m, err := buf.Read(out)
+	if err == io.EOF {
+		println("EOF:", err.Error())
+		// break
+	}
+
+	return out[:m]
+
+}
+
+// ProcessFile
+func ProcessFile(inputFile string) {
 	// Open input and output files
 	f1, err := os.Open(inputFile)
 	if err != nil {
@@ -68,41 +112,43 @@ func Run(inputFile string) {
 				break
 			}
 
-			piBuffer := bytes.NewReader(sampleCount[:x])
+			// piBuffer := bytes.NewReader(sampleCount[:x])
 
-			inputTmp := make([]int16, FrameSize)
-			outTmp := make([]float32, FrameSize)
+			// inputTmp := make([]int16, FrameSize)
+			// outTmp := make([]float32, FrameSize)
 
-			binaryRead(piBuffer, inputTmp)
+			// binaryRead(piBuffer, inputTmp)
 
-			for i := 0; i < FrameSize; i++ {
-				outTmp[i] = float32(inputTmp[i])
-			}
+			// for i := 0; i < FrameSize; i++ {
+			// 	outTmp[i] = float32(inputTmp[i])
+			// }
 
-			if len(inputTmp) < FrameSize {
-				println("input < 480")
-				break
-			}
+			// if len(inputTmp) < FrameSize {
+			// 	println("input < 480")
+			// 	break
+			// }
 
-			C.rnnoise_process_frame(st, (*C.float)(unsafe.Pointer(&outTmp[0])), (*C.float)(unsafe.Pointer(&outTmp[0])))
+			// C.rnnoise_process_frame(st, (*C.float)(unsafe.Pointer(&outTmp[0])), (*C.float)(unsafe.Pointer(&outTmp[0])))
 
-			for i := 0; i < FrameSize; i++ {
-				inputTmp[i] = int16(outTmp[i])
-			}
+			// for i := 0; i < FrameSize; i++ {
+			// 	inputTmp[i] = int16(outTmp[i])
+			// }
 
-			buf := new(bytes.Buffer)
-			binaryWrite(buf, inputTmp)
+			// buf := new(bytes.Buffer)
+			// binaryWrite(buf, inputTmp)
 
-			out := make([]byte, x)
-			m, err := buf.Read(out)
-			if err == io.EOF {
-				println("EOF:", err.Error())
-				break
-			}
-			println("x", x)
-			println("m", m)
+			// out := make([]byte, x)
+			// m, err := buf.Read(out)
+			// if err == io.EOF {
+			// 	println("EOF:", err.Error())
+			// 	break
+			// }
+			// println("x", x)
+			// println("m", m)
 
-			w.Write(out[:m])
+			out := Process(sampleCount[:x])
+
+			w.Write(out)
 		}
 	}()
 
