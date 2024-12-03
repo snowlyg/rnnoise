@@ -14,5 +14,5 @@ func main() {
 	}
 
 	inputFile := os.Args[1]
-	rnnoise.ProcessFile(inputFile)
+	rnnoise.PlayFile(inputFile)
 }
