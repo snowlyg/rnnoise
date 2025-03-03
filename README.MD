@@ -28,7 +28,3 @@ make
 make install
 
 ```
-
-## use for android
-
-[RnnoiseAndroidPlugin](https://github.com/snowlyg/RnnoiseAndroidPlugin.git)
